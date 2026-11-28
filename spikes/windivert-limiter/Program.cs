@@ -111,6 +111,8 @@ internal sealed unsafe class Spike
     private long _drops;
     private long _unmatched;
     private long _queuedBytes;
+    private long _flowEvents;
+    private long _targetFlows;
 
     public Spike(Options options)
     {
@@ -252,10 +254,12 @@ internal sealed unsafe class Spike
                 continue;
             }
             if (addr.Layer != WinDivertNative.LayerFlow) { continue; }
+            Interlocked.Increment(ref _flowEvents);
             uint key = Key(addr.LocalPort, addr.RemotePort);
             if (addr.Event == WinDivertNative.EventFlowEstablished)
             {
                 _flows[key] = addr.ProcessId;
+                if (_targets.Contains(addr.ProcessId)) { Interlocked.Increment(ref _targetFlows); }
             }
             else if (addr.Event == WinDivertNative.EventFlowDeleted)
             {
@@ -395,7 +399,7 @@ internal sealed unsafe class Spike
         using Process self = Process.GetCurrentProcess();
         string csvPath = Path.Combine(AppContext.BaseDirectory, $"spike-{DateTime.Now:yyyyMMdd-HHmmss}.csv");
         File.WriteAllText(csvPath, "second,arrived_KBps,released_KBps,other_KBps,queue_KB,drops_total,unmatched_pkts_total,cpu_percent_one_core\n");
-        Console.WriteLine("sec | arrived KB/s | released KB/s | other KB/s | queue KB | drops | unmatched pkts | CPU % (one core)");
+        Console.WriteLine("sec | arrived KB/s | released KB/s | other KB/s | queue KB | drops | unmatched pkts | CPU % | flow events | target flows");
 
         long prevArrived = 0, prevReleased = 0, prevPass = 0;
         TimeSpan prevCpu = self.TotalProcessorTime;
@@ -429,7 +433,7 @@ internal sealed unsafe class Spike
 
             _samples.Add((arrivedKb, releasedKb, cpu));
             Console.WriteLine(FormattableString.Invariant(
-                $"{second,3} | {arrivedKb,12:0.0} | {releasedKb,13:0.0} | {passKb,10:0.0} | {queueKb,8:0.0} | {drops,5} | {unmatched,14} | {cpu,8:0.0}"));
+                $"{second,3} | {arrivedKb,12:0.0} | {releasedKb,13:0.0} | {passKb,10:0.0} | {queueKb,8:0.0} | {drops,5} | {unmatched,14} | {cpu,5:0.0} | {Interlocked.Read(ref _flowEvents),11} | {Interlocked.Read(ref _targetFlows),12}"));
             File.AppendAllText(csvPath, FormattableString.Invariant(
                 $"{second},{arrivedKb:0.0},{releasedKb:0.0},{passKb:0.0},{queueKb:0.0},{drops},{unmatched},{cpu:0.0}\n"));
         }
